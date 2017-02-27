@@ -1,0 +1,225 @@
+#!/usr/bin/env bash
+################################################################################
+#  Author: <a href="mailto:debuti@gmail.com">Borja Garcia</a>
+# Program: userManager
+# Descrip: 
+# Version: 0.0.2
+#    Date: 20170223
+# License: This script doesn't require any license since it's not intended to be
+#          redistributed. In such case, unless stated otherwise, the purpose of
+#          the author is to follow GPLv3.
+# Version: 0.0.0 (20130326)
+#           - Initial release
+# Version: 0.0.1 (20170223)
+#           - Minor improvements (tested in rpi)
+# Version: 0.0.2 (20170223)
+#           - New sudo options
+################################################################################
+
+# Parameters
+DATE=`date +%Y%m%d`
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+while [ -h "$SCRIPT_PATH" ] ; do 
+  SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"; 
+done
+SCRIPT_DIR="$( cd -P "$( dirname "$SCRIPT_PATH" )" && pwd )"
+LOG_PATH="$SCRIPT_DIR/log"
+
+# Constants
+chroot_file="/etc/vsftpd.chroot_list"
+temp_file="/tmp/um.tmp"
+working_shell="/bin/bash"
+not_working_shell="/bin/false"
+ADMIN_GROUPS="adm sudo dialout cdrom audio video plugdev games users netdev input spi i2c gpio samba-writers"
+
+# Global variables
+log="$LOG_PATH/$DATE.log"
+
+# Error declaration
+
+# Usage function
+
+function usage() {
+    # Tell the user how to use me
+    echo -e "usage: $0 <make|enable|disable|enablesudo|disablesudo|enablejail|disablejail|delete>"
+    echo -e "\tmake\tuser pw"
+    echo -e "\tenable\tuser"
+    echo -e "\tdisable\tuser"
+    echo -e "\tenablesudo\tuser"
+    echo -e "\tdisablesudo\tuser"
+    echo -e "\tenablejail\tuser"
+    echo -e "\tdisablejail\tuser"
+    echo -e "\tdelete\tuser"
+}
+  
+# Creates a new user in the system
+function makeuser() {
+    user=$1
+    pw=$2
+    
+    #Add to system
+    useradd -m -U -p nose -s $working_shell $user
+    echo "spawn passwd $user
+      expect \"password:\"
+      send \"$pw\r\"
+      expect \"password:\"
+      send \"$pw\r\"
+      expect eof" > /tmp/expect.cmd
+    expect -f /tmp/expect.cmd &>/dev/null
+    rm /tmp/expect.cmd
+    
+    #Add to samba
+    echo "spawn smbpasswd -a $user
+      expect \"password:\"
+      send \"$pw\r\"
+      expect \"password:\"
+      send \"$pw\r\"
+      expect eof" > /tmp/expect.cmd
+    expect -f /tmp/expect.cmd &>/dev/null
+    rm /tmp/expect.cmd
+    
+    #Add to ftpchroot
+    echo -e "$user\n" >> $chroot_file
+    
+    #Block home
+    chmod -R 700 /home/$user
+    grep $user /etc/passwd
+}
+
+# Deletes a user from the system and removes its home
+function deleteuser() {
+    user=$1
+    userdel -r $user
+    grep -v $user $chroot_file > $temp_file
+    mv $temp_file $chroot_file
+    grep $user $chroot_file
+}
+
+function enablesudo() {
+    user=$1
+    for GROUP in $ADMIN_GROUPS; do 
+        adduser $user $GROUP; 
+    done;
+    # For nopasswd
+    echo "$user ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/010_$user-nopasswd
+}
+
+function disablesudo() {
+    user=$1
+    for GROUP in $ADMIN_GROUPS; do 
+        deluser $user $GROUP; 
+    done;
+    rm -f /etc/sudoers.d/010_$user-nopasswd
+}
+
+# Inhibits tty access
+function enablejail() {
+    user=$1
+    # Set new home and new shell
+    usermod -d /media -s $not_working_shell $user &>/dev/null
+    grep $user /etc/passwd
+    grep -v $user $chroot_file > $temp_file
+    mv $temp_file $chroot_file
+    grep $user $chroot_file
+}
+
+function disablejail() {
+    user=$1
+    usermod -d /home/$user -s $working_shell $user
+    grep $user /etc/passwd
+    echo -e "$user" >> $chroot_file
+    grep $user $chroot_file
+}
+
+function enableuser() {
+    user=$1
+    passwd -u $user
+}
+
+function disableuser() {
+    user=$1
+    passwd -l $user
+}
+
+# Input validation function (getopts)
+function checkInput() {
+  # Check input and store params in global variables to use them from main or call usage()
+  if [ $# -le 1 ]; then
+    usage $0
+    exit -1
+  else
+    action=$1
+    if [ $action = "make" ]; then
+      if [ $# -ne 3 ]; then
+        usage $0
+        exit -1
+      fi
+      makeuser $2 $3
+      
+    elif [ $action = "enablesudo" ]; then
+      if [ $# -ne 2 ]; then
+        usage $0
+        exit -1
+      fi
+      enablesudo $2
+      
+    elif [ $action = "disablesudo" ]; then
+      if [ $# -ne 2 ]; then
+        usage $0
+        exit -1
+      fi
+      disablesudo $2
+      
+    elif [ $action = "enablejail" ]; then
+      if [ $# -ne 2 ]; then
+        usage $0
+        exit -1
+      fi
+      enablejail $2
+      
+    elif [ $action = "disablejail" ]; then
+      if [ $# -ne 2 ]; then
+        usage $0
+        exit -1
+      fi
+      disablejail $2
+      
+    elif [ $action = "enable" ]; then
+      if [ $# -ne 2 ]; then
+        usage $0
+        exit -1
+      fi
+      enableuser $2
+      
+    elif [ $action = "disable" ]; then
+      if [ $# -ne 2 ]; then
+        usage $0
+        exit -1
+      fi
+      disableuser $2
+      
+    elif [ $action = "delete" ]; then
+      if [ $# -ne 2 ]; then
+        usage $0
+        exit -1
+      fi
+      deleteuser $2
+      
+    else
+      usage $0
+      exit -1
+    fi
+    
+    service vsftpd restart &>/dev/null
+  fi
+}
+
+# Entry point
+
+if [ $USER != "root" ]; then
+ echo "This script must be run as root"
+ exit -1
+fi;
+
+checkInput $@
+
