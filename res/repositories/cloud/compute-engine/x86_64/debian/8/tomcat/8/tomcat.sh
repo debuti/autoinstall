@@ -104,7 +104,8 @@ preconfigure() {
   echo -n 'HTTPS cert pwd: ' && read certpassword 
   echo "$us:$password:$certpassword" >> "$CONFIG_TEMP" && echo ""
   result=0;  
-  return $result;
+	  rplittedaa << EOG
+turn $result;
 }
 
 # Configure this software
@@ -124,15 +125,23 @@ configure() {
     chown tomcat8:tomcat8 /etc/authbind/byport/$i
   done
 
+  TOMCAT_DEFAULT_FILE="/etc/default/tomcat8"
+  OLD_TOMCAT_DEFAULT_FILE=$TOMCAT_DEFAULT_FILE.$(date +%Y%m%d-%H%M%S)
+  cp $TOMCAT_DEFAULT_FILE $OLD_TOMCAT_DEFAULT_FILE
+  cat $OLD_TOMCAT_DEFAULT_FILE | 
+  sed "s/^#AUTHBIND=no$/AUTHBIND=yes/g" > $TOMCAT_DEFAULT_FILE
+
+
   TOMCAT_CONF_FILE="/etc/tomcat8/server.xml"
   OLD_TOMCAT_CONF_FILE=$TOMCAT_CONF_FILE.$(date +%Y%m%d-%H%M%S)
   cp $TOMCAT_CONF_FILE $OLD_TOMCAT_CONF_FILE
   cat $OLD_TOMCAT_CONF_FILE |perl -0pe 's/<!--.*?-->//sg' | sed '/^\s*$/d' > $TOMCAT_CONF_FILE.tmp
-  cat $OLD_TOMCAT_CONF_FILE.tmp |
-  sed "s/port=\"8080\"/port=\"80\"/g" |
-  sed "s/port=\"8443\"/port=\"443\"/g" > $TOMCAT_CONF_FILE.tmp2
+  cat $TOMCAT_CONF_FILE.tmp |
+  sed "s/\"8080\"/\"80\"/g" |
+  sed "s/\"8443\"/\"443\"/g" > $TOMCAT_CONF_FILE.tmp2
   SPLIT_LINE=$(cat $TOMCAT_CONF_FILE.tmp2 | grep Connector -n | cut -f1 -d":")
   SPLIT_LINE=$(($SPLIT_LINE-1))
+  echo "Will split by $SPLIT_LINE"
   split -l$SPLIT_LINE $TOMCAT_CONF_FILE.tmp2 splitted
   cat >> splittedaa << EOG
 <Connector port="443" protocol="org.apache.coyote.http11.Http11NioProtocol"
