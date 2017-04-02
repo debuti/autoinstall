@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+################################################################################
+#  Author: <a href="mailto:debuti@gmail.com">Borja Garcia</a>
+# Program: certbot-tomcat
+# Descrip: Software for renewing certs and apply em to server.xml
+# Version: 0.1.0
+#    Date: 20170324
+# License: This script doesn't require any license since it's not intended to be
+#          redistributed. In such case, unless stated otherwise, the purpose of
+#          the author is to follow GPLv3.
+# Version history: 
+#          0.1.0 (20170324)
+#           - Initial release
+################################################################################
+
+# Error codes
+NOERROR=0;
+ERROR_NOROOT=0;
+ERROR_NODEPS=0;
+
+# Globals
+DOMAIN=
+KEYPWD=
+WEBSERVER_ROOT="/var/lib/tomcat8/webapps/ROOT/"
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+while [ -h "$SCRIPT_PATH" ] ; do 
+  SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"; 
+done
+SCRIPT_DIR="$( cd -P "$( dirname "$SCRIPT_PATH" )" && pwd )"
+filename=$(basename "$SCRIPT_PATH")
+app="${filename%.*}"
+extension="${filename##*.}"
+INSTALL_TEMP="/tmp/autoinstall.install.$app.tmp"
+CONFIG_TEMP="/tmp/autoinstall.config.$app.tmp"
+
+# Aux methods
+checkroot() {   
+  if [[ $EUID -ne 0 ]]; then
+   echo "This script must be run as root" 1>&2
+   return -1
+  fi
+  return 0;  
+}
+
+# Check for other packages needed for installation
+checkdependencies() {
+  result=0;
+  command="expect"
+  if ! which $command > /dev/null; then
+    echo -e "Dependency not found. Install it by typing"
+    echo -e "  sudo apt-get install -y expect"
+    result=-1;
+  fi   
+  command="openssl"
+  if ! which $command > /dev/null; then
+    echo -e "Dependency not found. Install it by typing"
+    echo -e "  sudo apt-get install -y openssl"
+    result=-1;
+  fi   
+  return $result;  
+}
+
+# Configure this software
+do_shit() {
+  if [[ -d /etc/letsencrypt/live/$DOMAIN ]]; then
+    echo "Renewing"
+    certbot renew --quiet
+  else
+    echo "Creating new ones"
+    certbot certonly --webroot -w $WEBSERVER_ROOT -d $DOMAIN --quiet
+  fi
+
+  if test `find /etc/letsencrypt/live/$DOMAIN/privkey.pem -mmin +120`; then     
+    echo "Old enough"; 
+    service tomcat8 stop
+    rm /etc/tomcat8/keystore.jks
+    echo "spawn openssl pkcs12 -export -in /etc/letsencrypt/live/$DOMAIN/fullchain.pem -inkey /etc/letsencrypt/live/$DOMAIN/privkey.pem -CAfile /etc/letsencrypt/live/$DOMAIN/chain.pem -out /etc/letsencrypt/live/$DOMAIN/keystore.p12
+		expect \"Password:\"
+		send \"$KEYPWD\r\"
+		expect \"Password:\"
+		send \"$KEYPWD\r\"
+		expect eof" > /tmp/expect.cmd
+    expect -f /tmp/expect.cmd &>/dev/null
+    rm /tmp/expect.cmd
+	#openssl pkcs12 -export -in /etc/letsencrypt/live/$DOMAIN/fullchain.pem \
+	#                       -inkey /etc/letsencrypt/live/$DOMAIN/privkey.pem \
+	#			 -CAfile /etc/letsencrypt/live/$DOMAIN/chain.pem \
+	#			 -out /etc/letsencrypt/live/$DOMAIN/keystore.p12
+	  
+    keytool -importkeystore \
+	-deststorepass $KEYPWD \
+	-destkeystore /etc/tomcat8/keystore.jks \
+	-srckeystore /etc/letsencrypt/live/$DOMAIN/keystore.p12 \
+	-srcstoretype PKCS12 \
+	-srcstorepass $KEYPWD
+    chmod 700 /etc/tomcat8/keystore.jks
+    chown tomcat8:tomcat8 /etc/tomcat8/keystore.jks
+    service tomcat8 start
+    #keytool -list -keystore /etc/tomcat8/keystore.jks -v
+  fi
+  
+  result=0
+  return $result;
+}
+
+(checkroot || exit $ERROR_NOROOT)
+(checkdependencies || exit $ERROR_NODEPS)
+
+do_shit

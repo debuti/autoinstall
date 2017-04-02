@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 ################################################################################
 #  Author: <a href="mailto:debuti@gmail.com">Borja Garcia</a>
-# Program: minidlna raspbian
+# Program: vsftpd debian
 # Descrip: 
 # Version: 0.1.0
-#    Date: 20170222
+#    Date: 20170324
 # License: This script doesn't require any license since it's not intended to be
 #          redistributed. In such case, unless stated otherwise, the purpose of
 #          the author is to follow GPLv3.
 # Version history: 
-#          0.1.0 (20170222)
+#          0.1.0 (20170324)
 #           - Initial release
 ################################################################################
 
@@ -44,6 +44,7 @@ checkroot() {
   fi
   return 0;  
 }
+
 # Archive old configuration files
 archiveconf() {
   confpath="$0";
@@ -62,9 +63,7 @@ checkdependencies() {
 # Check if already installed
 alreadyinstalled() {
   result=0;
-  # Repeat this foreach dependency 
-  command="minidlnad"
-  if ! which $command > /dev/null; then
+  if [[ `ls -1 /etc/vsftpd.conf* | wc -l` -eq  0 ]]; then
     result=-1;
   fi   
   return $result;  
@@ -79,35 +78,16 @@ preinstall() {
 # Do the installation
 doinstall() {
   result=-1;
-  apt-get update && \
-  apt-get -y install minidlna && \
-  cat > /etc/init/minidlna.conf << EOG
-description "Task to start minidlna"
-
-start on (local-filesystems and net-device-up IFACE!=lo)
-
-task
-
-exec service minidlna start
-
-EOG
-
-  #  echo "[Desktop Entry]
-  #Encoding=UTF-8
-  #Type=Application
-  #Name=MiniDLNA
-  #Comment=Server to stream media over network
-  #Exec=minidlna -f /home/$USER/.minidlna/minidlna.conf -P /home/$USER/.minidlna/minidlna.pid
-  #StartupNotify=false
-  #Terminal=false
-  #Hidden=false" > /home/$USER/.config/autostart/minidlna.desktop && \
-  service minidlna start
+  apt-get -y update && \
+  apt-get -y install ftp && \
+  apt-get -y install vsftpd && \
+  echo "Go to https://console.cloud.google.com/networking/firewalls and create a new firewall rule: allow-ftp 0.0.0.0/0 tcp:20-21" && \
   result=0
-  return $result;	
+  return $result;
 }
 
 # Remove working dir, preinstall files and such
-postinstall() {  
+postinstall() { 
   result=0;  
   return $result;
 }
@@ -115,40 +95,39 @@ postinstall() {
 # Configure this software
 configure() {
   result=-1;
-  service minidlna stop
-  MINIDLNA_CONF_FILE="/etc/minidlna.conf"
-  MINIDLNA_CONF_FILE_OLD=$MINIDLNA_CONF_FILE.$(date +%Y%m%d-%H%M%S)
-  cp $MINIDLNA_CONF_FILE $MINIDLNA_CONF_FILE_OLD
-  cat $MINIDLNA_CONF_FILE_OLD | 
-  sed 's/^media_dir.*/media_dir=V,\/media\/hd_media\/Media\/Videos\nmedia_dir=V,\/media\/hd_media\/Queues/g' |  
-  sed 's/.*log_level.*/log_level=general,database,inotify,scanner=info,metadata,http,ssdp,tivo,artwork=warn/g' |  
-  sed 's/^#friendly_name.*/friendly_name=videoclub/g' | 
-  sed 's/.*notify_interval.*/notify_interval=300/g' | 
-  sed 's/^#db_dir.*/db_dir=\/var\/cache\/minidlna/g' | 
-  sed 's/^#log_dir.*/log_dir=\/var\/log/g' | 
-  sed 's/^#inotify.*/inotify=yes/g' | 
-  sed 's/^#root_container.*/root_container=./g' > $MINIDLNA_CONF_FILE
-  if [[ -z $(grep max_user_watches /etc/sysctl.conf) ]]; then
-    echo "fs.inotify.max_user_watches=999999999"  >> /etc/sysctl.conf
+  # Permit /bin/false shell users to login to the ftp server
+  if [[ -z $(grep "^/bin/false$" /etc/shells) ]]; then
+    echo "/bin/false" >> /etc/shells
   fi;
+  FTP_PROPERTIES_FILE="/etc/vsftpd.conf"
+  BACKUP_PROPERTIES_FILE=$FTP_PROPERTIES_FILE.$(date +%Y%m%d.%H%M%S)
+  cp $FTP_PROPERTIES_FILE $BACKUP_PROPERTIES_FILE
+  cat $BACKUP_PROPERTIES_FILE | 
+  sed "s/anonymous_enable=.*/anonymous_enable=NO/g" | 
+  sed "s/#local_enable.*/local_enable=YES/g" | 
+  sed "s/#write_enable.*/write_enable=YES/g" |
+  sed "s/#chroot_local_user.*/chroot_local_user=YES/g" | 
+  sed "s/#chroot_list_enable.*/chroot_list_enable=YES/g" | 
+  sed "s/#chroot_list_file.*/chroot_list_file=\/etc\/vsftpd.chroot_list/g" | 
+  sed "s/#ftpd_banner=.*/ftpd_banner=Private FTP Server/g" > $FTP_PROPERTIES_FILE
+  echo "allow_writeable_chroot=YES" >> $FTP_PROPERTIES_FILE
+  # Los que entran en el fichero de chroot son los que NO quedan restringidos a su casa
+  touch /etc/vsftpd.chroot_list
+  /etc/init.d/vsftpd restart
+  result=0
+  return $result;
+}
 
-  # Reload every morning to ensure everythings alright
-  CACHE_DIR=$(cat $MINIDLNA_CONF_FILE | grep -v ^#.* | grep db_dir | cut -f2 -d=)
-  if [[ -z $CACHE_DIR ]]; then
-    CACHE_DIR="/var/cache/minidlna"
-  fi;
-  cat > /etc/cron.daily/minidlna << EOG
-#!/bin/sh
-
-test -x /usr/sbin/service || exit 0
-/usr/sbin/service minidlna stop
-rm -rf $CACHE_DIR/*
-/usr/sbin/service minidlna force-reload
-EOG
-  chmod 755 /etc/cron.daily/minidlna
-  
-  service minidlna force-reload
-  result=0;  
+# Properly uninstall this sw
+uninstall() {
+  result=-1;
+  FTP_PROPERTIES_FILE="/etc/vsftpd.conf"
+  BACKUP_PROPERTIES_FILE=$FTP_PROPERTIES_FILE.$(date +%Y%m%d.%H%M%S)
+  cp $FTP_PROPERTIES_FILE $BACKUP_PROPERTIES_FILE
+  apt-get -y purge vsftpd && \
+  apt-get -y clean && \
+  apt-get -y autoremove && \
+  result=0
   return $result;
 }
 
@@ -163,17 +142,6 @@ postconfigure() {
   result=0;  
   return $result;
 }
-
-# Properly uninstall this sw
-uninstall() {
-  result=-1; 
-  apt-get -y purge minidlna && \
-  apt-get -y clean && \
-  apt-get -y autoremove && \
-  result=0;  
-  return $result;
-}
-
 
 
 # Usage

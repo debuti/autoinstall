@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 ################################################################################
 #  Author: <a href="mailto:debuti@gmail.com">Borja Garcia</a>
-# Program: minidlna raspbian
+# Program: installall. Installation package
 # Descrip: 
 # Version: 0.1.0
-#    Date: 20170222
+#    Date: 20141031
 # License: This script doesn't require any license since it's not intended to be
 #          redistributed. In such case, unless stated otherwise, the purpose of
 #          the author is to follow GPLv3.
 # Version history: 
-#          0.1.0 (20170222)
+#          0.1.0 (20141031)
 #           - Initial release
 ################################################################################
 
@@ -30,13 +30,13 @@ ERROR_REINSTALL_FAILED=-100;
 
 # Globals
 SCRIPT_PATH="${BASH_SOURCE[0]}"
+SCRIPT_NAME=$SCRIPT_PATH
 filename=$(basename "$SCRIPT_PATH")
 app="${filename%.*}"
 extension="${filename##*.}"
 INSTALL_TEMP="/tmp/autoinstall.install.$app.tmp"
 CONFIG_TEMP="/tmp/autoinstall.config.$app.tmp"
 
-# Aux methods
 checkroot() {   
   if [[ $EUID -ne 0 ]]; then
    echo "This script must be run as root" 1>&2
@@ -44,14 +44,6 @@ checkroot() {
   fi
   return 0;  
 }
-# Archive old configuration files
-archiveconf() {
-  confpath="$0";
-  archiveconfpath="$confpath".old.`date +%Y%m%d.%H%M%S`
-  mv "$confpath" "$archiveconfpath"
-  return "$archiveconfpath"
-}
-
 
 # Check for other packages needed for installation
 checkdependencies() {
@@ -63,8 +55,8 @@ checkdependencies() {
 alreadyinstalled() {
   result=0;
   # Repeat this foreach dependency 
-  command="minidlnad"
-  if ! which $command > /dev/null; then
+  command=""
+  if [ ! -z "`grep remove-source-files /root/.bashrc`" ]; then
     result=-1;
   fi   
   return $result;  
@@ -72,84 +64,68 @@ alreadyinstalled() {
 
 # Prepare and fetch required data, and save it somewhere
 preinstall() {
-  result=0;  
-  return $result;
+  echo "" > "$CONFIG_TEMP"
+  echo 'Insert username for installing this program:' && read var && echo "username=$var" >> "$CONFIG_TEMP"
+  return 0;
+}
+
+installaliases() {
+  #http://www.marksanborn.net/linux/creating-useful-bash-aliases/
+  path=$1
+  user=$2
+  echo 'alias smv="rsync --remove-source-files -varP"'  >>$path/.bashrc
+  echo 'alias rsynccopy="rsync --partial --progress --append --rsh=ssh -r -h "' >> $path/.bashrc
+  echo 'tmv() { rsync -varp "$1" "$2" && rm -rf "$1";}' >> $path/.bashrc
+  echo 'alias rsyncmove="rsync --partial --progress --append --rsh=ssh -r -h --remove-sent-files"' >> $path/.bashrc
+  echo 'alias psx="ps -auxw | grep $1"' >>$path/.bashrc
+  echo 'alias psme="ps -Af | grep $USER"' >>$path/.bashrc
+  echo 'alias psname="ps -Af | grep $1"' >>$path/.bashrc
+  echo 'alias psport="lsof -i | grep $1"' >>$path/.bashrc
+  echo 'alias ..="cd .."' >> $path/.bashrc
+  echo 'alias ...="cd ../.."' >> $path/.bashrc
+  echo 'alias ....="cd ../../.."' >> $path/.bashrc
+  echo 'alias .....="cd ../../../.."' >> $path/.bashrc
+  echo 'alias ..="cd .."' >> $path/.bashrc
+  echo 'alias ..2="cd ../.."' >> $path/.bashrc
+  echo 'alias ..3="cd ../../.."' >> $path/.bashrc
+  echo 'alias ..4="cd ../../../.."' >> $path/.bashrc
+  echo 'alias ll="ls -la"' >> $path/.bashrc
+  echo 'alias dfh="df -h"' >> $path/.bashrc
+  echo 'alias transmission-remote="transmission-remote --auth $USER:$PWD"' >> $path/.bashrc
+  echo 'function cdl { cd $1; ls;}' >> $path/.bashrc
+  echo 'last() { history | tail -2 | head -1 | sed "s|\s*\w*\s*||"; }' >> $path/.bashrc
+  #echo 'alias xargscomma="sed "s/\'/\\\\\\'/g" | xargs"' >> $path/.bashrc
+  #echo 'alias codename="lsb_release -c | sed \'s/\w*:\s*//g\\'"' >> $path/.bashrc
 }
 
 # Do the installation
 doinstall() {
   result=-1;
-  apt-get update && \
-  apt-get -y install minidlna && \
-  cat > /etc/init/minidlna.conf << EOG
-description "Task to start minidlna"
 
-start on (local-filesystems and net-device-up IFACE!=lo)
+  username=`cat "$CONFIG_TEMP" | grep "username=" | sed -s 's/username=//g'`
 
-task
-
-exec service minidlna start
-
-EOG
-
-  #  echo "[Desktop Entry]
-  #Encoding=UTF-8
-  #Type=Application
-  #Name=MiniDLNA
-  #Comment=Server to stream media over network
-  #Exec=minidlna -f /home/$USER/.minidlna/minidlna.conf -P /home/$USER/.minidlna/minidlna.pid
-  #StartupNotify=false
-  #Terminal=false
-  #Hidden=false" > /home/$USER/.config/autostart/minidlna.desktop && \
-  service minidlna start
+  installaliases "/root/" "root" && \
+  installaliases "/home/$username" "$username" && \
   result=0
-  return $result;	
+  return $result;
 }
 
 # Remove working dir, preinstall files and such
 postinstall() {  
-  result=0;  
-  return $result;
+  if [[ -f "$CONFIG_TEMP" ]]; then rm "$CONFIG_TEMP"; fi;
+  
+  # If any temporary files like downloads or so, remove them here
+  return 0;
 }
 
 # Configure this software
 configure() {
-  result=-1;
-  service minidlna stop
-  MINIDLNA_CONF_FILE="/etc/minidlna.conf"
-  MINIDLNA_CONF_FILE_OLD=$MINIDLNA_CONF_FILE.$(date +%Y%m%d-%H%M%S)
-  cp $MINIDLNA_CONF_FILE $MINIDLNA_CONF_FILE_OLD
-  cat $MINIDLNA_CONF_FILE_OLD | 
-  sed 's/^media_dir.*/media_dir=V,\/media\/hd_media\/Media\/Videos\nmedia_dir=V,\/media\/hd_media\/Queues/g' |  
-  sed 's/.*log_level.*/log_level=general,database,inotify,scanner=info,metadata,http,ssdp,tivo,artwork=warn/g' |  
-  sed 's/^#friendly_name.*/friendly_name=videoclub/g' | 
-  sed 's/.*notify_interval.*/notify_interval=300/g' | 
-  sed 's/^#db_dir.*/db_dir=\/var\/cache\/minidlna/g' | 
-  sed 's/^#log_dir.*/log_dir=\/var\/log/g' | 
-  sed 's/^#inotify.*/inotify=yes/g' | 
-  sed 's/^#root_container.*/root_container=./g' > $MINIDLNA_CONF_FILE
-  if [[ -z $(grep max_user_watches /etc/sysctl.conf) ]]; then
-    echo "fs.inotify.max_user_watches=999999999"  >> /etc/sysctl.conf
-  fi;
+  return 0;
+}
 
-  # Reload every morning to ensure everythings alright
-  CACHE_DIR=$(cat $MINIDLNA_CONF_FILE | grep -v ^#.* | grep db_dir | cut -f2 -d=)
-  if [[ -z $CACHE_DIR ]]; then
-    CACHE_DIR="/var/cache/minidlna"
-  fi;
-  cat > /etc/cron.daily/minidlna << EOG
-#!/bin/sh
-
-test -x /usr/sbin/service || exit 0
-/usr/sbin/service minidlna stop
-rm -rf $CACHE_DIR/*
-/usr/sbin/service minidlna force-reload
-EOG
-  chmod 755 /etc/cron.daily/minidlna
-  
-  service minidlna force-reload
-  result=0;  
-  return $result;
+# Properly uninstall this sw
+uninstall() {
+  return 0;
 }
 
 # Prepare and fetch required data (ONLY FOR CONFIGURE), and save it somewhere
@@ -160,16 +136,9 @@ preconfigure() {
 
 # Remove working dir, preconfigure files and such
 postconfigure() {  
-  result=0;  
-  return $result;
-}
-
-# Properly uninstall this sw
-uninstall() {
-  result=-1; 
-  apt-get -y purge minidlna && \
-  apt-get -y clean && \
-  apt-get -y autoremove && \
+  if [[ -f "$CONFIG_TEMP" ]]; then 
+    rm "$CONFIG_TEMP"; 
+  fi;
   result=0;  
   return $result;
 }

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 ################################################################################
 #  Author: <a href="mailto:debuti@gmail.com">Borja Garcia</a>
-# Program: minidlna raspbian
+# Program: mysql debian
 # Descrip: 
 # Version: 0.1.0
-#    Date: 20170222
+#    Date: 20170324
 # License: This script doesn't require any license since it's not intended to be
 #          redistributed. In such case, unless stated otherwise, the purpose of
 #          the author is to follow GPLv3.
 # Version history: 
-#          0.1.0 (20170222)
+#          0.1.0 (20170324)
 #           - Initial release
 ################################################################################
 
@@ -44,6 +44,7 @@ checkroot() {
   fi
   return 0;  
 }
+
 # Archive old configuration files
 archiveconf() {
   confpath="$0";
@@ -51,7 +52,6 @@ archiveconf() {
   mv "$confpath" "$archiveconfpath"
   return "$archiveconfpath"
 }
-
 
 # Check for other packages needed for installation
 checkdependencies() {
@@ -62,9 +62,7 @@ checkdependencies() {
 # Check if already installed
 alreadyinstalled() {
   result=0;
-  # Repeat this foreach dependency 
-  command="minidlnad"
-  if ! which $command > /dev/null; then
+  if ! $(which mysqld > /dev/null); then
     result=-1;
   fi   
   return $result;  
@@ -72,83 +70,55 @@ alreadyinstalled() {
 
 # Prepare and fetch required data, and save it somewhere
 preinstall() {
+  result=-1; 
+  if [[ -f "$CONFIG_TEMP" ]]; then
+    return 0
+  fi;
+  echo -n "" > "$CONFIG_TEMP" && \
+  echo -n 'Mysql root passwd: ' &&  read password 
+  echo "$password" >> "$CONFIG_TEMP" && echo ""
   result=0;  
   return $result;
 }
 
 # Do the installation
 doinstall() {
-  result=-1;
-  apt-get update && \
-  apt-get -y install minidlna && \
-  cat > /etc/init/minidlna.conf << EOG
-description "Task to start minidlna"
+  result=-1; 
+  PW=$(cat "$CONFIG_TEMP"| cut -f1 -d":")
+  if [[ -z $PW ]]; then
+    echo "Use preconfigure first";
+    return -1;
+  fi;
 
-start on (local-filesystems and net-device-up IFACE!=lo)
-
-task
-
-exec service minidlna start
-
-EOG
-
-  #  echo "[Desktop Entry]
-  #Encoding=UTF-8
-  #Type=Application
-  #Name=MiniDLNA
-  #Comment=Server to stream media over network
-  #Exec=minidlna -f /home/$USER/.minidlna/minidlna.conf -P /home/$USER/.minidlna/minidlna.pid
-  #StartupNotify=false
-  #Terminal=false
-  #Hidden=false" > /home/$USER/.config/autostart/minidlna.desktop && \
-  service minidlna start
+  apt-get -y update && \
+  debconf-set-selections <<< "mysql-server-5.5 mysql-server/root_password password $PW" && \
+  debconf-set-selections <<< "mysql-server-5.5 mysql-server/root_password_again password $PW" && \
+  apt-get -y install mysql-server-5.5 && \
+  rm -f "$CONFIG_TEMP" && \
   result=0
-  return $result;	
+  #Test with $ mysqlshow -u root mysql -p
+  return $result;
 }
 
 # Remove working dir, preinstall files and such
-postinstall() {  
+postinstall() { 
   result=0;  
   return $result;
 }
 
 # Configure this software
 configure() {
+  result=0;
+  return $result;
+}
+
+# Properly uninstall this sw
+uninstall() {
   result=-1;
-  service minidlna stop
-  MINIDLNA_CONF_FILE="/etc/minidlna.conf"
-  MINIDLNA_CONF_FILE_OLD=$MINIDLNA_CONF_FILE.$(date +%Y%m%d-%H%M%S)
-  cp $MINIDLNA_CONF_FILE $MINIDLNA_CONF_FILE_OLD
-  cat $MINIDLNA_CONF_FILE_OLD | 
-  sed 's/^media_dir.*/media_dir=V,\/media\/hd_media\/Media\/Videos\nmedia_dir=V,\/media\/hd_media\/Queues/g' |  
-  sed 's/.*log_level.*/log_level=general,database,inotify,scanner=info,metadata,http,ssdp,tivo,artwork=warn/g' |  
-  sed 's/^#friendly_name.*/friendly_name=videoclub/g' | 
-  sed 's/.*notify_interval.*/notify_interval=300/g' | 
-  sed 's/^#db_dir.*/db_dir=\/var\/cache\/minidlna/g' | 
-  sed 's/^#log_dir.*/log_dir=\/var\/log/g' | 
-  sed 's/^#inotify.*/inotify=yes/g' | 
-  sed 's/^#root_container.*/root_container=./g' > $MINIDLNA_CONF_FILE
-  if [[ -z $(grep max_user_watches /etc/sysctl.conf) ]]; then
-    echo "fs.inotify.max_user_watches=999999999"  >> /etc/sysctl.conf
-  fi;
-
-  # Reload every morning to ensure everythings alright
-  CACHE_DIR=$(cat $MINIDLNA_CONF_FILE | grep -v ^#.* | grep db_dir | cut -f2 -d=)
-  if [[ -z $CACHE_DIR ]]; then
-    CACHE_DIR="/var/cache/minidlna"
-  fi;
-  cat > /etc/cron.daily/minidlna << EOG
-#!/bin/sh
-
-test -x /usr/sbin/service || exit 0
-/usr/sbin/service minidlna stop
-rm -rf $CACHE_DIR/*
-/usr/sbin/service minidlna force-reload
-EOG
-  chmod 755 /etc/cron.daily/minidlna
-  
-  service minidlna force-reload
-  result=0;  
+  apt-get -y purge mysql-server-5.5 && \
+  apt-get -y clean && \
+  apt-get -y autoremove && \
+  result=0
   return $result;
 }
 
@@ -160,16 +130,6 @@ preconfigure() {
 
 # Remove working dir, preconfigure files and such
 postconfigure() {  
-  result=0;  
-  return $result;
-}
-
-# Properly uninstall this sw
-uninstall() {
-  result=-1; 
-  apt-get -y purge minidlna && \
-  apt-get -y clean && \
-  apt-get -y autoremove && \
   result=0;  
   return $result;
 }

@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 ################################################################################
 #  Author: <a href="mailto:debuti@gmail.com">Borja Garcia</a>
-# Program: minidlna raspbian
+# Program: tomcat debian
 # Descrip: 
 # Version: 0.1.0
-#    Date: 20170222
+#    Date: 20170324
 # License: This script doesn't require any license since it's not intended to be
 #          redistributed. In such case, unless stated otherwise, the purpose of
 #          the author is to follow GPLv3.
 # Version history: 
-#          0.1.0 (20170222)
+#          0.1.0 (20170324)
 #           - Initial release
 ################################################################################
+
+#TODO: Server.xml config 
+
 
 # Error codes
 NOERROR=0;
@@ -26,7 +29,6 @@ ERROR_CONFIGURE_FAILED=-70;
 ERROR_POSTCONFIGURE_FAILED=-80;
 ERROR_UNINSTALL_FAILED=-90;
 ERROR_REINSTALL_FAILED=-100;
-
 
 # Globals
 SCRIPT_PATH="${BASH_SOURCE[0]}"
@@ -44,6 +46,7 @@ checkroot() {
   fi
   return 0;  
 }
+
 # Archive old configuration files
 archiveconf() {
   confpath="$0";
@@ -61,11 +64,9 @@ checkdependencies() {
 
 # Check if already installed
 alreadyinstalled() {
-  result=0;
-  # Repeat this foreach dependency 
-  command="minidlnad"
-  if ! which $command > /dev/null; then
-    result=-1;
+  result=-1;
+  if [[ -f /etc/default/tomcat8 ]]; then
+    result=0;
   fi   
   return $result;  
 }
@@ -80,30 +81,10 @@ preinstall() {
 doinstall() {
   result=-1;
   apt-get update && \
-  apt-get -y install minidlna && \
-  cat > /etc/init/minidlna.conf << EOG
-description "Task to start minidlna"
-
-start on (local-filesystems and net-device-up IFACE!=lo)
-
-task
-
-exec service minidlna start
-
-EOG
-
-  #  echo "[Desktop Entry]
-  #Encoding=UTF-8
-  #Type=Application
-  #Name=MiniDLNA
-  #Comment=Server to stream media over network
-  #Exec=minidlna -f /home/$USER/.minidlna/minidlna.conf -P /home/$USER/.minidlna/minidlna.pid
-  #StartupNotify=false
-  #Terminal=false
-  #Hidden=false" > /home/$USER/.config/autostart/minidlna.desktop && \
-  service minidlna start
-  result=0
-  return $result;	
+  apt-get -y install tomcat8 && \
+  apt-get -y install tomcat8-admin && \
+  result=0;  
+  return $result;
 }
 
 # Remove working dir, preinstall files and such
@@ -112,54 +93,105 @@ postinstall() {
   return $result;
 }
 
-# Configure this software
-configure() {
-  result=-1;
-  service minidlna stop
-  MINIDLNA_CONF_FILE="/etc/minidlna.conf"
-  MINIDLNA_CONF_FILE_OLD=$MINIDLNA_CONF_FILE.$(date +%Y%m%d-%H%M%S)
-  cp $MINIDLNA_CONF_FILE $MINIDLNA_CONF_FILE_OLD
-  cat $MINIDLNA_CONF_FILE_OLD | 
-  sed 's/^media_dir.*/media_dir=V,\/media\/hd_media\/Media\/Videos\nmedia_dir=V,\/media\/hd_media\/Queues/g' |  
-  sed 's/.*log_level.*/log_level=general,database,inotify,scanner=info,metadata,http,ssdp,tivo,artwork=warn/g' |  
-  sed 's/^#friendly_name.*/friendly_name=videoclub/g' | 
-  sed 's/.*notify_interval.*/notify_interval=300/g' | 
-  sed 's/^#db_dir.*/db_dir=\/var\/cache\/minidlna/g' | 
-  sed 's/^#log_dir.*/log_dir=\/var\/log/g' | 
-  sed 's/^#inotify.*/inotify=yes/g' | 
-  sed 's/^#root_container.*/root_container=./g' > $MINIDLNA_CONF_FILE
-  if [[ -z $(grep max_user_watches /etc/sysctl.conf) ]]; then
-    echo "fs.inotify.max_user_watches=999999999"  >> /etc/sysctl.conf
+preconfigure() {
+  result=-1; 
+  if [[ -f "$CONFIG_TEMP" ]]; then
+    return 0
   fi;
-
-  # Reload every morning to ensure everythings alright
-  CACHE_DIR=$(cat $MINIDLNA_CONF_FILE | grep -v ^#.* | grep db_dir | cut -f2 -d=)
-  if [[ -z $CACHE_DIR ]]; then
-    CACHE_DIR="/var/cache/minidlna"
-  fi;
-  cat > /etc/cron.daily/minidlna << EOG
-#!/bin/sh
-
-test -x /usr/sbin/service || exit 0
-/usr/sbin/service minidlna stop
-rm -rf $CACHE_DIR/*
-/usr/sbin/service minidlna force-reload
-EOG
-  chmod 755 /etc/cron.daily/minidlna
-  
-  service minidlna force-reload
+  echo -n "" > "$CONFIG_TEMP" && \
+  echo -n 'Tomcat Manager user: ' && read us
+  echo -n 'Tomcat Manager password: ' && read password 
+  echo -n 'HTTPS cert pwd: ' && read certpassword 
+  echo "$us:$password:$certpassword" >> "$CONFIG_TEMP" && echo ""
   result=0;  
   return $result;
 }
 
-# Prepare and fetch required data (ONLY FOR CONFIGURE), and save it somewhere
-preconfigure() {
+# Configure this software
+configure() {
+  result=-1; 
+  US=$(cat "$CONFIG_TEMP"| cut -f1 -d":")
+  PW=$(cat "$CONFIG_TEMP"| cut -f2 -d":")
+  CERTPW=$(cat "$CONFIG_TEMP"| cut -f3 -d":")
+  if [[ -z $PW ]]; then
+    echo "Use preconfigure first";
+    return -1;
+  fi;
+
+  for i in 80 443; do
+    touch /etc/authbind/byport/$i
+    chmod 500 /etc/authbind/byport/$i
+    chown tomcat8:tomcat8 /etc/authbind/byport/$i
+  done
+
+  TOMCAT_CONF_FILE="/etc/tomcat8/server.xml"
+  OLD_TOMCAT_CONF_FILE=$TOMCAT_CONF_FILE.$(date +%Y%m%d-%H%M%S)
+  cp $TOMCAT_CONF_FILE $OLD_TOMCAT_CONF_FILE
+  cat $OLD_TOMCAT_CONF_FILE |perl -0pe 's/<!--.*?-->//sg' | sed '/^\s*$/d' > $TOMCAT_CONF_FILE.tmp
+  cat $OLD_TOMCAT_CONF_FILE.tmp |
+  sed "s/port=\"8080\"/port=\"80\"/g" |
+  sed "s/port=\"8443\"/port=\"443\"/g" > $TOMCAT_CONF_FILE.tmp2
+  SPLIT_LINE=$(cat $TOMCAT_CONF_FILE.tmp2 | grep Connector -n | cut -f1 -d":")
+  SPLIT_LINE=$(($SPLIT_LINE-1))
+  split -l$SPLIT_LINE $TOMCAT_CONF_FILE.tmp2 splitted
+  cat >> splittedaa << EOG
+<Connector port="443" protocol="org.apache.coyote.http11.Http11NioProtocol"
+ maxThreads="150" SSLEnabled="true" scheme="https" secure="true" sslProtocol="TLS"
+ keystoreFile="/etc/tomcat8/keystore.jks" keystorePass="$CERTPW" clientAuth="false"
+ ciphers="TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
+TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256,
+TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384,
+TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+TLS_ECDH_ECDSA_WITH_AES_128_CBC_SHA256,
+TLS_ECDH_ECDSA_WITH_AES_256_CBC_SHA384,
+TLS_ECDH_ECDSA_WITH_AES_128_GCM_SHA256,
+TLS_ECDH_ECDSA_WITH_AES_256_GCM_SHA384" />
+EOG
+  cat splitted* > $TOMCAT_CONF_FILE
+  rm -f $OLD_TOMCAT_CONF_FILE.tmp* splitted*
+
+
+  TOMCAT_USER_FILE="/etc/tomcat8/tomcat-users.xml"
+  OLD_TOMCAT_USER_FILE=$TOMCAT_USER_FILE.$(date +%Y%m%d-%H%M%S)
+  cp $TOMCAT_USER_FILE $OLD_TOMCAT_USER_FILE
+  cat > $TOMCAT_USER_FILE << EOG
+<?xml version='1.0' encoding='utf-8'?> 
+<tomcat-users>  
+    <role rolename="admin-gui"/>
+    <role rolename="admin-script"/>
+    <role rolename="manager-gui"/>
+    <role rolename="manager-script"/>
+    <role rolename="manager-jmx"/>
+    <role rolename="manager-status"/>
+    <user username="$US" password="$PW" roles="manager-gui,manager-script,manager-jmx,manager-status,admin-gui,admin-script"/> 
+</tomcat-users>
+EOG
+
+  cat > /var/lib/tomcat8/webapps/ROOT/index.html << EOG
+<html>
+  Hi there you!
+</html>
+EOG
+
+  chmod 700 $TOMCAT_USER_FILE
+  chown tomcat8:tomcat8 $TOMCAT_USER_FILE
+  service tomcat8 restart
+  rm -f "$CONFIG_TEMP"
   result=0;  
   return $result;
 }
 
 # Remove working dir, preconfigure files and such
 postconfigure() {  
+  if [[ -f "$CONFIG_TEMP" ]]; then 
+    rm "$CONFIG_TEMP"; 
+  fi;
   result=0;  
   return $result;
 }
@@ -167,7 +199,9 @@ postconfigure() {
 # Properly uninstall this sw
 uninstall() {
   result=-1; 
-  apt-get -y purge minidlna && \
+  service tomcat8 stop
+  apt-get -y purge tomcat8-admin && \
+  apt-get -y purge tomcat8 && \
   apt-get -y clean && \
   apt-get -y autoremove && \
   result=0;  
