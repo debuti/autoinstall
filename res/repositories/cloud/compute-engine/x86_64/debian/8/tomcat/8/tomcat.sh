@@ -104,8 +104,7 @@ preconfigure() {
   echo -n 'HTTPS cert pwd: ' && read certpassword 
   echo "$us:$password:$certpassword" >> "$CONFIG_TEMP" && echo ""
   result=0;  
-	  rplittedaa << EOG
-turn $result;
+  return $result;
 }
 
 # Configure this software
