@@ -162,7 +162,7 @@ TLS_ECDH_ECDSA_WITH_AES_128_GCM_SHA256,
 TLS_ECDH_ECDSA_WITH_AES_256_GCM_SHA384" />
 EOG
   cat splitted* > $TOMCAT_CONF_FILE
-  rm -f $OLD_TOMCAT_CONF_FILE.tmp* splitted*
+  rm -f $TOMCAT_CONF_FILE.tmp* splitted*
 
 
   TOMCAT_USER_FILE="/etc/tomcat8/tomcat-users.xml"

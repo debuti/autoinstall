@@ -71,10 +71,10 @@ do_shit() {
     certbot certonly --webroot -w $WEBSERVER_ROOT -d $DOMAIN --quiet --agree-tos --email $EMAIL
   fi
 
-  if test `find /etc/letsencrypt/live/$DOMAIN/privkey.pem -mmin +120`; then     
+  if test `find /etc/letsencrypt/live/$DOMAIN/privkey.pem -mmin -120`; then     
     echo "Old enough"; 
     service tomcat8 stop
-    rm /etc/tomcat8/keystore.jks
+    rm -f /etc/tomcat8/keystore.jks 2> /dev/null
     echo "spawn openssl pkcs12 -export -in /etc/letsencrypt/live/$DOMAIN/fullchain.pem -inkey /etc/letsencrypt/live/$DOMAIN/privkey.pem -CAfile /etc/letsencrypt/live/$DOMAIN/chain.pem -out /etc/letsencrypt/live/$DOMAIN/keystore.p12
 		expect \"Password:\"
 		send \"$KEYPWD\r\"

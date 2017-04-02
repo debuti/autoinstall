@@ -137,6 +137,7 @@ configure() {
 
   bash $CERTBOT_TOMCAT_SH
   service tomcat8 restart
+  rm -f "$CONFIG_TEMP"
   result=0
   return $result;
 }
