@@ -21,6 +21,7 @@ ERROR_NODEPS=0;
 # Globals
 DOMAIN=
 KEYPWD=
+EMAIL=
 WEBSERVER_ROOT="/var/lib/tomcat8/webapps/ROOT/"
 SCRIPT_PATH="${BASH_SOURCE[0]}"
 while [ -h "$SCRIPT_PATH" ] ; do 
@@ -67,7 +68,7 @@ do_shit() {
     certbot renew --quiet
   else
     echo "Creating new ones"
-    certbot certonly --webroot -w $WEBSERVER_ROOT -d $DOMAIN --quiet
+    certbot certonly --webroot -w $WEBSERVER_ROOT -d $DOMAIN --quiet --agree-tos --email $EMAIL
   fi
 
   if test `find /etc/letsencrypt/live/$DOMAIN/privkey.pem -mmin +120`; then     

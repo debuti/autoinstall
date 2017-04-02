@@ -107,8 +107,9 @@ preconfigure() {
   fi;
   echo -n "" > "$CONFIG_TEMP" && \
   echo -n 'Hostname (just whole dns name, without http and shit): ' && read hn
+  echo -n 'SysAdmin email address: ' && read email
   echo -n 'Password for tomcat keystore: ' && read password
-  echo "$hn;$password" >> "$CONFIG_TEMP" && echo ""
+  echo "$hn;$email;$password" >> "$CONFIG_TEMP" && echo ""
   result=0;  
   return $result;
 }
@@ -117,7 +118,8 @@ preconfigure() {
 configure() {
   result=-1; 
   HN=$(cat "$CONFIG_TEMP" | cut -f1 -d";")
-  PW=$(cat "$CONFIG_TEMP" | cut -f2 -d";")
+  EMAIL=$(cat "$CONFIG_TEMP" | cut -f2 -d";")
+  PW=$(cat "$CONFIG_TEMP" | cut -f3 -d";")
   if [[ -z $HN ]]; then
     echo "Use preconfigure first";
     return -1;
@@ -130,7 +132,11 @@ configure() {
   cp $CERTBOT_TOMCAT_SH $OLD_CERTBOT_TOMCAT_SH
   cat $OLD_CERTBOT_TOMCAT_SH |
   sed "s/^DOMAIN=.*/DOMAIN=\"$HN\"/g" |
-  sed "s/^KEYPWD=.*/KEYPWD=\"$PW\"/g" > $CERTBOT_TOMCAT_SH
+  sed "s/^KEYPWD=.*/KEYPWD=\"$PW\"/g" |
+  sed "s/^EMAIL=.*/EMAIL=\"$EMAIL\"/g" > $CERTBOT_TOMCAT_SH
+
+  bash $CERTBOT_TOMCAT_SH
+  service tomcat8 restart
   result=0
   return $result;
 }
