@@ -3,15 +3,23 @@
 #  Author: <a href="mailto:debuti@gmail.com">Borja Garcia</a>
 # Program: autoinstall
 # Descrip: 
-# Version: 0.1.0
+# Version: 0.1.1
 #    Date: 20170222
 # License: This script doesn't require any license since it's not intended to be
 #          redistributed. In such case, unless stated otherwise, the purpose of
 #          the author is to follow GPLv3.
-# Version history: 
+# Version history:
+#          0.1.1 (20180315)
+#           - Added custom commands: reboot, message and messagewait
 #          0.0.0 (20170222)
 #           - Initial release
 ################################################################################
+
+# Check for root
+if [[ $EUID -ne 0 ]]; then
+ echo "This script must be run as root" 1>&2
+ exit -1
+fi
 
 # Parameters
 DATE=`date +%Y%m%d`
@@ -27,8 +35,8 @@ columns=$(tput cols)
 alias txtgrn='tput setaf 2' # Green
 alias txtpur='tput setaf 5' # Purple
 alias txtrst='tput sgr0'    # Text reset.
-col1=$(echo $columns*0.8 / 1|bc||echo 50)
-col2=$(echo $columns-$col1|bc||echo 50)
+col1=$(echo $columns*0.8 / 1|bc 2>/dev/null || awk "BEGIN {printf \"%.0f\n\", $columns*0.8 / 1}" || echo 50)
+col2=$(echo $columns-$col1|bc 2>/dev/null   || awk "BEGIN {printf \"%.0f\n\", $columns-$col1}"   || echo 50)
 
 
 # Global variables
@@ -170,10 +178,12 @@ function main() {
       continue
     fi;
 
-    installerPath=`readlink -f $config_file | xargs dirname | xargs find | grep /$arq/ | grep /$os/$osversion/ | grep /$app/$version/ | grep /$app.sh$ | head -1`
+    installerPath=`readlink -f $config_file | xargs dirname | xargs find | grep /$arq/ | grep /$os/$osversion/ | grep /$app/$version/ | grep /$app.sh$ | head 
+-1`
     
     if [[ -z "$installerPath" ]]; then
-      printf "%-${col1}s%-${col2}s\n" "System:$system Arq:$arq OS:$os OSver:$osversion App:$app v:$version Action:$action" "$(tput setaf 5)[FAIL] I cant found install file$(tput sgr0)"
+      printf "%-${col1}s%-${col2}s\n" "System:$system Arq:$arq OS:$os OSver:$osversion App:$app v:$version Action:$action" "$(tput setaf 5)[FAIL] I cant found
+ install file$(tput sgr0)"
       return -1;
     else 
       if [[ $dry == "Checked" ]]; then 
@@ -186,7 +196,8 @@ function main() {
         bash $installerPath $action
       fi
       if [[ $? -ne 0 ]]; then
-        printf "%-${col1}s%-${col2}s\n" "System:$system Arq:$arq OS:$os OSver:$osversion App:$app v:$version Action:$action" "$(tput setaf 5)[FAIL]$(tput sgr0)"
+        printf "%-${col1}s%-${col2}s\n" "System:$system Arq:$arq OS:$os OSver:$osversion App:$app v:$version Action:$action" "$(tput setaf 5)[FAIL]$(tput sgr0
+)"
         if [[ $stop_if_failed == "Checked" ]]; then 
           printf "Check your logs $stdout and $stderr"
           return -1;
@@ -207,19 +218,32 @@ function main() {
     version=`echo $line|cut -f6 -d"|"`
     action=`echo $line|cut -f7 -d"|"`
 
-    if [[ $line == "reboot" ]]; then
+    if [[ ! -z $(echo $rawline | egrep "^reboot") ]]; then
       echo "Rebooting in 10 seconds";
       sleep 10;
-      reboot;
+      reboot now;
+    fi;
+    if [[ ! -z $(echo $rawline | egrep "^messagewait")  ]]; then
+      msg=$(echo $rawline | sed 's/^message\w* //g' |sed 's/"//g') 
+      echo "$msg"
+      read -n1 -r -p "Press space to continue..." key
+      continue
+    fi;
+    if [[ ! -z $(echo $rawline | egrep "^message") ]]; then
+      msg=$(echo $rawline | sed 's/^message\w* //g' |sed 's/"//g') 
+      echo "$msg"
+      continue
     fi;
 
     stdout="$LOG_PATH/$DATE.$app.out"
     stderr="$LOG_PATH/$DATE.$app.err"
  
-    installerPath=`readlink -f $config_file | xargs dirname | xargs find | grep /$arq/ | grep /$os/$osversion/ | grep /$app/$version/ | grep /$app.sh$ | head -1`
+    installerPath=`readlink -f $config_file | xargs dirname | xargs find | grep /$arq/ | grep /$os/$osversion/ | grep /$app/$version/ | grep /$app.sh$ | head 
+-1`
     
     if [[ -z "$installerPath" ]]; then
-      printf "%-${col1}s%s\n" "System:$system Arq:$arq OS:$os OSver:$osversion App:$app v:$version Action:$action" "$(tput setaf 5)[FAIL] I cant found install file$(tput sgr0)"
+      printf "%-${col1}s%s\n" "System:$system Arq:$arq OS:$os OSver:$osversion App:$app v:$version Action:$action" "$(tput setaf 5)[FAIL] I cant found install
+ file$(tput sgr0)"
       return -1;
     else 
       LAST_OUTPUT_STATUS=0
@@ -281,4 +305,3 @@ main
 exit_code=$?
 closeLog
 exit $exit_code
-
